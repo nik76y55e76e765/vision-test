@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Field Sync: Mobile Test</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: monospace; }
+        video { position: fixed; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; transition: filter 0.5s; }
+        canvas { position: fixed; top: 0; left: 0; z-index: 2; pointer-events: none; }
+        #ui { position: absolute; bottom: 30px; width: 100%; text-align: center; z-index: 100; }
+        #btn { background: rgba(0,0,0,0.7); border: 2px solid #00f0ff; color: #00f0ff; padding: 15px 30px; border-radius: 50px; font-size: 14px; letter-spacing: 2px; }
+        #log { position: absolute; top: 20px; left: 20px; color: #00f0ff; font-size: 10px; z-index: 100; text-transform: uppercase; }
+    </style>
+</head>
+<body>
+    <div id="log">Status: Waiting for sync...</div>
+    <video id="webcam" autoplay playsinline></video>
+    <div id="ui"><button id="btn">Запустить процесс</button></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const video = document.getElementById('webcam');
+        const btn = document.getElementById('btn');
+        const log = document.getElementById('log');
+
+        // Доступ к камере
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+            .then(s => { video.srcObject = s; })
+            .catch(e => alert("Камера недоступна"));
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+        camera.position.z = 4;
+
+        // Создаем форму сгустка (используем икосаэдр для "кристалличности")
+        const geom = new THREE.IcosahedronGeometry(1.2, 3);
+        
+        // 1. Материал Ауры
+        const auraMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff, wireframe: true, transparent: true, opacity: 0 });
+        const aura = new THREE.Mesh(geom, auraMat);
+        aura.scale.setScalar(1.1);
+        
+        // 2. Материал Сгустка (плотный)
+        const coreMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending });
+        const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1, 4), coreMat);
+        
+        scene.add(aura, core);
+
+        let stage = 0; // 0: Maya, 1: Aura, 2: Dissolve, 3: Field
+        let progress = 0;
+
+        btn.onclick = () => { if(stage === 0) stage = 1; btn.style.display = 'none'; };
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const t = Date.now() * 0.001;
+
+            if (stage > 0) {
+                progress += 0.005; 
+                
+                // Стадия 1: Проявление Ауры
+                if (progress < 0.3) {
+                    auraMat.opacity = progress * 3;
+                    log.innerText = "Phase: Aura Manifestation";
+                } 
+                // Стадия 2: Размытие реальности и проявление ядра
+                else if (progress < 0.7) {
+                    const localP = (progress - 0.3) * 2.5;
+                    video.style.filter = `blur(${localP * 10}px) brightness(${1 + localP})`;
+                    coreMat.opacity = localP * 0.6;
+                    log.innerText = "Phase: Physical Dissolve";
+                }
+                // Стадия 3: Фиксация Сгустка
+                else if (progress <= 1.0) {
+                    log.innerText = "Phase: Ocean Field Core";
+                    video.style.opacity = 1 - (progress - 0.7) * 3;
+                }
+            }
+
+            // Анимация вращения и пульсации
+            aura.rotation.y += 0.01;
+            core.rotation.x -= 0.015;
+            const s = 1 + Math.sin(t * 2) * 0.05;
+            core.scale.set(s, s, s);
+
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
