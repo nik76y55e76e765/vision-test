@@ -2,181 +2,49 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Energy Field AR</title>
+<title>AR Test</title>
 <style>
   body { margin:0; overflow:hidden; }
-  button {
-    position:absolute;
-    bottom:20px;
-    left:50%;
-    transform:translateX(-50%);
-    padding:12px 20px;
-    font-size:16px;
-    z-index:10;
-  }
 </style>
 </head>
 <body>
 
-<button id="start">Start AR</button>
-
 <script type="module">
+
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
 import { ARButton } from "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/webxr/ARButton.js";
 
 let camera, scene, renderer;
-let controller;
-let reticle;
-let hitTestSource = null;
-let localSpace = null;
 
 init();
 
-function init() {
+function init(){
 
   scene = new THREE.Scene();
-
   camera = new THREE.PerspectiveCamera();
 
-  renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+  renderer = new THREE.WebGLRenderer({ antialias:true, alpha:true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
   document.body.appendChild(renderer.domElement);
 
+  document.body.appendChild(
+    ARButton.createButton(renderer, {
+      requiredFeatures: ['hit-test']
+    })
+  );
+
   const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
   scene.add(light);
 
-  // Reticle (куда ставим объект)
-  const ring = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI/2);
-  const mat = new THREE.MeshBasicMaterial({ color:0xaaaaaa });
-  reticle = new THREE.Mesh(ring, mat);
-  reticle.matrixAutoUpdate = false;
-  reticle.visible = false;
-  scene.add(reticle);
-
-  controller = renderer.xr.getController(0);
-  controller.addEventListener("select", placeObject);
-  scene.add(controller);
-
-  document.getElementById("start").addEventListener("click", async () => {
-
-    const session = await navigator.xr.requestSession("immersive-ar", {
-      requiredFeatures:["hit-test","local-floor"]
-    });
-
-    renderer.xr.setReferenceSpaceType("local");
-    await renderer.xr.setSession(session);
-
-    localSpace = await session.requestReferenceSpace("local");
-    const viewerSpace = await session.requestReferenceSpace("viewer");
-
-    hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
-
-    renderer.setAnimationLoop(render);
-  });
+  renderer.setAnimationLoop(render);
 }
 
-function createEnergyField() {
-
-  const geometry = new THREE.SphereGeometry(0.15, 64, 64);
-
-  const material = new THREE.ShaderMaterial({
-    transparent:true,
-    side:THREE.BackSide,
-    uniforms:{ time:{ value:0 }},
-    vertexShader:`
-      varying vec3 vPos;
-      void main(){
-        vPos = position;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-      }
-    `,
-    fragmentShader:`
-      varying vec3 vPos;
-      uniform float time;
-
-      float hash(vec3 p){
-        return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453);
-      }
-
-      float noise(vec3 p){
-        vec3 i = floor(p);
-        vec3 f = fract(p);
-        f = f*f*(3.0-2.0*f);
-
-        float n = mix(
-          mix(
-            mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x),
-            mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x),
-            f.y),
-          mix(
-            mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
-            mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x),
-            f.y),
-          f.z);
-        return n;
-      }
-
-      void main(){
-
-        vec3 pos = vPos * 0.8;
-
-        float base = noise(pos*4.0);
-        float structure = noise(pos*0.8);
-
-        float density = base * (0.85 + 0.15*structure);
-
-        density += sin(time*0.3)*0.01;
-
-        float fog = smoothstep(0.3,0.7,density);
-
-        vec3 col = vec3(0.82,0.83,0.85);
-
-        gl_FragColor = vec4(col*fog, fog*0.07);
-      }
-    `
-  });
-
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.userData.isEnergy = true;
-
-  return mesh;
-}
-
-function placeObject() {
-  if (!reticle.visible) return;
-
-  const energy = createEnergyField();
-  energy.position.setFromMatrixPosition(reticle.matrix);
-  scene.add(energy);
-}
-
-function render(timestamp, frame){
-
-  if(frame && hitTestSource){
-
-    const hitTestResults = frame.getHitTestResults(hitTestSource);
-
-    if(hitTestResults.length > 0){
-      const hit = hitTestResults[0];
-      const pose = hit.getPose(localSpace);
-
-      reticle.visible = true;
-      reticle.matrix.fromArray(pose.transform.matrix);
-    } else {
-      reticle.visible = false;
-    }
-  }
-
-  scene.traverse(obj=>{
-    if(obj.userData.isEnergy){
-      obj.material.uniforms.time.value = timestamp*0.001;
-    }
-  });
-
+function render(){
   renderer.render(scene, camera);
 }
 
 </script>
+
 </body>
 </html>
