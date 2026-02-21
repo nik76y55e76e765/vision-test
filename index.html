@@ -1,334 +1,182 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digital Soul: AR Mode</title>
-    <style>
-        body { margin:0; overflow:hidden; background:#000; font-family:'Courier New',monospace; color:#00ffcc; touch-action:none; }
-        #info { position:absolute; top:20px; left:20px; right:20px; background:rgba(0,15,15,0.95); padding:15px; border:1px solid #00ffcc; border-radius:8px; z-index:10; font-size:13px; }
-        #arButton, #resetButton {
-            position:absolute; left:50%; transform:translateX(-50%);
-            padding:15px 40px; background:#00ffcc; color:#000; border:none;
-            border-radius:8px; font-weight:bold; font-size:16px; cursor:pointer; z-index:100;
-        }
-        #arButton { bottom:30px; }
-        #resetButton { bottom:100px; background:#ff00aa; color:#fff; display:none; }
-        #arButton:hover, #resetButton:hover { background:#fff; }
-        .hidden { display:none !important; }
-    </style>
+<meta charset="utf-8">
+<title>Energy Field AR</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  button {
+    position:absolute;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    padding:12px 20px;
+    font-size:16px;
+    z-index:10;
+  }
+</style>
 </head>
 <body>
-    <div id="info">
-        <div style="font-weight:bold; margin-bottom:8px;">📱 DIGITAL SOUL AR</div>
-        <div id="status">Загрузка...</div>
-    </div>
-   
-    <button id="arButton">ВОЙТИ В AR</button>
-    <button id="resetButton">ПЕРЕСТАВИТЬ КРИСТАЛЛ</button>
 
-    <!-- Проверенная стабильная версия -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
-    <script type="module">
-        let scene, camera, renderer, fieldGroup, reticle;
-        let particleCount = 2200;
-        let CORE_COUNT = 1200;
-        let positions, basePositions, particleColors, velocities;
-        let corePositions, coreBase, coreVel, coreGeo;
-        let time = 0;
-        let fieldPlaced = false;
-        let hitTestSource = null;
-        let xrRefSpace = null;
-        let colorGroups = [];
-        let dragging = false, lastMouseX = 0, lastMouseY = 0;
+<button id="start">Start AR</button>
 
-        const COLOR_LIST = [[0,1,0.8],[0,0.5,1],[0.8,0.2,1],[1,0.3,0]];
-        const NUM_COLORS = 4;
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
+import { ARButton } from "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/webxr/ARButton.js";
 
-        function init() {
-            const status = document.getElementById('status');
-            if ('xr' in navigator) {
-                navigator.xr.isSessionSupported('immersive-ar').then(supported => {
-                    if (supported) {
-                        status.innerHTML = '✅ AR готов!<br>Нажми кнопку и наведи на пол';
-                        document.getElementById('arButton').style.display = 'block';
-                        document.getElementById('arButton').addEventListener('click', startAR);
-                    } else {
-                        startPreviewMode();
-                    }
-                });
-            } else {
-                startPreviewMode();
-            }
-            document.getElementById('resetButton').addEventListener('click', resetField);
-            window.addEventListener('resize', onResize);
-        }
+let camera, scene, renderer;
+let controller;
+let reticle;
+let hitTestSource = null;
+let localSpace = null;
 
-        function startPreviewMode() {
-            document.getElementById('status').innerHTML = '🖥️ ПК-Превью<br>Крути мышкой — кристалл живой!';
-            document.getElementById('arButton').style.display = 'none';
+init();
 
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 50);
-            camera.position.set(0, 0.6, 2.2);
+function init() {
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.body.appendChild(renderer.domElement);
+  scene = new THREE.Scene();
 
-            createQuantumField();
-            fieldGroup.visible = true;
-            fieldGroup.position.set(0, -0.35, 0);
-            fieldGroup.scale.set(0.45, 0.45, 0.45);
+  camera = new THREE.PerspectiveCamera();
 
-            const dom = renderer.domElement;
-            dom.addEventListener('mousedown', e=>{dragging=true; lastMouseX=e.clientX; lastMouseY=e.clientY;});
-            dom.addEventListener('mouseup', ()=>dragging=false);
-            dom.addEventListener('mousemove', onMouseMove);
-            dom.addEventListener('mouseleave', ()=>dragging=false);
+  renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-            animatePreview();
-        }
+  const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+  scene.add(light);
 
-        function onMouseMove(e) {
-            if(!dragging) return;
-            const dx = e.clientX - lastMouseX;
-            fieldGroup.rotation.y += dx * 0.006;
-            lastMouseX = e.clientX;
-        }
+  // Reticle (куда ставим объект)
+  const ring = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI/2);
+  const mat = new THREE.MeshBasicMaterial({ color:0xaaaaaa });
+  reticle = new THREE.Mesh(ring, mat);
+  reticle.matrixAutoUpdate = false;
+  reticle.visible = false;
+  scene.add(reticle);
 
-        function animatePreview() {
-            requestAnimationFrame(animatePreview);
-            time += 0.016;
-            animateField();
-            renderer.render(scene, camera);
-        }
+  controller = renderer.xr.getController(0);
+  controller.addEventListener("select", placeObject);
+  scene.add(controller);
 
-        async function startAR() { /* AR-код остался без изменений, работает */ 
-            // (полный AR-код тот же, что был раньше — не менял)
-            const session = await navigator.xr.requestSession('immersive-ar', {requiredFeatures:['hit-test']});
-            session.addEventListener('end', ()=>location.reload());
-            scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
-            renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
+  document.getElementById("start").addEventListener("click", async () => {
 
-            const reticleGeo = new THREE.RingGeometry(0.15,0.2,32).rotateX(-Math.PI/2);
-            reticle = new THREE.Mesh(reticleGeo, new THREE.MeshBasicMaterial({color:0x00ffcc}));
-            reticle.matrixAutoUpdate = false; reticle.visible = false;
-            scene.add(reticle);
+    const session = await navigator.xr.requestSession("immersive-ar", {
+      requiredFeatures:["hit-test","local-floor"]
+    });
 
-            createQuantumField();
-            await renderer.xr.setSession(session);
+    renderer.xr.setReferenceSpaceType("local");
+    await renderer.xr.setSession(session);
 
-            const viewerSpace = await session.requestReferenceSpace('viewer');
-            hitTestSource = await session.requestHitTestSource({space: viewerSpace});
+    localSpace = await session.requestReferenceSpace("local");
+    const viewerSpace = await session.requestReferenceSpace("viewer");
 
-            document.getElementById('info').classList.add('hidden');
-            document.getElementById('arButton').classList.add('hidden');
-            renderer.xr.setAnimationLoop(arRenderLoop);
-        }
+    hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-        function arRenderLoop(timestamp, frame) {
-            if(!frame) return;
-            xrRefSpace = renderer.xr.getReferenceSpace();
+    renderer.setAnimationLoop(render);
+  });
+}
 
-            if(hitTestSource && !fieldPlaced) {
-                const hits = frame.getHitTestResults(hitTestSource);
-                if(hits.length) {
-                    reticle.visible = true;
-                    reticle.matrix.fromArray(hits[0].getPose(xrRefSpace).transform.matrix);
-                } else reticle.visible = false;
-            }
+function createEnergyField() {
 
-            for(let input of frame.session.inputSources) {
-                if(input.gamepad?.buttons[0]?.pressed && !fieldPlaced && reticle.visible) {
-                    const hits = frame.getHitTestResults(hitTestSource);
-                    if(hits.length) {
-                        const pose = hits[0].getPose(xrRefSpace);
-                        const mat = new THREE.Matrix4().fromArray(pose.transform.matrix);
-                        fieldGroup.position.setFromMatrixPosition(mat);
-                        fieldGroup.quaternion.setFromRotationMatrix(new THREE.Matrix4().extractRotation(mat));
-                        fieldGroup.visible = true;
-                        fieldPlaced = true;
-                        document.getElementById('resetButton').style.display = 'block';
-                    }
-                }
-            }
+  const geometry = new THREE.SphereGeometry(0.15, 64, 64);
 
-            if(fieldPlaced) {
-                time += 0.018;
-                animateField();
-            }
-            renderer.render(scene, camera);
-        }
+  const material = new THREE.ShaderMaterial({
+    transparent:true,
+    side:THREE.BackSide,
+    uniforms:{ time:{ value:0 }},
+    vertexShader:`
+      varying vec3 vPos;
+      void main(){
+        vPos = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+      }
+    `,
+    fragmentShader:`
+      varying vec3 vPos;
+      uniform float time;
 
-        function createQuantumField() {
-            fieldGroup = new THREE.Group();
-            scene.add(fieldGroup);
+      float hash(vec3 p){
+        return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453);
+      }
 
-            const crystal = new THREE.Mesh(
-                new THREE.BoxGeometry(2.2, 3.0, 0.3),
-                new THREE.MeshBasicMaterial({color:0x00ffcc, transparent:true, opacity:0.04, wireframe:true})
-            );
-            fieldGroup.add(crystal);
+      float noise(vec3 p){
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f*f*(3.0-2.0*f);
 
-            particleColors = new Uint8Array(particleCount);
-            velocities = new Float32Array(particleCount*3);
-            positions = new Float32Array(particleCount*3);
-            basePositions = new Float32Array(particleCount*3);
+        float n = mix(
+          mix(
+            mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x),
+            mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x),
+            f.y),
+          mix(
+            mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
+            mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x),
+            f.y),
+          f.z);
+        return n;
+      }
 
-            for(let i=0;i<particleCount;i++) particleColors[i] = i%NUM_COLORS;
-            updateParticleDistribution();
+      void main(){
 
-            colorGroups = [];
-            for(let c=0; c<NUM_COLORS; c++) {
-                const col = COLOR_LIST[c];
-                const cnt = Math.floor(particleCount/NUM_COLORS);
-                const groupPos = new Float32Array(cnt*3);
-                let ci=0;
-                for(let i=0; i<particleCount; i++) {
-                    if(particleColors[i]===c) {
-                        groupPos[ci*3] = positions[i*3];
-                        groupPos[ci*3+1] = positions[i*3+1];
-                        groupPos[ci*3+2] = positions[i*3+2];
-                        ci++;
-                    }
-                }
-                const geo = new THREE.BufferGeometry();
-                geo.setAttribute('position', new THREE.BufferAttribute(groupPos,3));
-                const mat = new THREE.PointsMaterial({
-                    size:0.045, map:makeTexture(col[0]*255,col[1]*255,col[2]*255),
-                    transparent:true, blending:THREE.AdditiveBlending, depthWrite:false
-                });
-                fieldGroup.add(new THREE.Points(geo, mat));
-                colorGroups.push({positions:groupPos, geo, count:cnt, colorIdx:c});
-            }
+        vec3 pos = vPos * 0.8;
 
-            buildCoreBase();
-            coreGeo = new THREE.BufferGeometry();
-            coreGeo.setAttribute('position', new THREE.BufferAttribute(corePositions,3));
-            fieldGroup.add(new THREE.Points(coreGeo, new THREE.PointsMaterial({size:0.18, map:makeTexture(220,240,255), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.55})));
-            fieldGroup.add(new THREE.Points(coreGeo, new THREE.PointsMaterial({size:0.09, map:makeTexture(255,255,255), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0.9})));
-            fieldGroup.add(new THREE.Points(coreGeo, new THREE.PointsMaterial({size:0.035, map:makeTexture(255,255,255), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:1})));
-        }
+        float base = noise(pos*4.0);
+        float structure = noise(pos*0.8);
 
-        function makeTexture(r,g,b) {
-            const c = document.createElement('canvas'); c.width=c.height=32;
-            const ctx = c.getContext('2d');
-            const grad = ctx.createRadialGradient(16,16,0,16,16,16);
-            grad.addColorStop(0, `rgba(${r|0},${g|0},${b|0},1)`);
-            grad.addColorStop(0.45, `rgba(${r|0},${g|0},${b|0},0.5)`);
-            grad.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = grad; ctx.fillRect(0,0,32,32);
-            return new THREE.CanvasTexture(c);
-        }
+        float density = base * (0.85 + 0.15*structure);
 
-        function updateParticleDistribution() { /* тот же код, что раньше */ 
-            for(let i=0;i<particleCount;i++) {
-                const t = i/particleCount;
-                if(t<0.45) {
-                    const f = Math.pow(Math.random(),3.2);
-                    basePositions[i*3] = (Math.random()-0.5)*2.3*f*1.9;
-                    basePositions[i*3+1] = (Math.random()-0.5)*3.4;
-                    basePositions[i*3+2] = (Math.random()-0.5)*0.45;
-                } else {
-                    const f = Math.pow(Math.random(),2.1);
-                    const r = 2.25*f;
-                    const a = Math.random()*Math.PI*2;
-                    basePositions[i*3] = r*Math.cos(a)*1.45;
-                    basePositions[i*3+1] = (Math.random()-0.5)*3.6;
-                    basePositions[i*3+2] = r*Math.sin(a)*0.65;
-                }
-                positions[i*3] = basePositions[i*3];
-                positions[i*3+1] = basePositions[i*3+1];
-                positions[i*3+2] = basePositions[i*3+2];
-            }
-        }
+        density += sin(time*0.3)*0.01;
 
-        function buildCoreBase() { /* тот же */ 
-            corePositions = new Float32Array(CORE_COUNT*3);
-            coreBase = new Float32Array(CORE_COUNT*3);
-            coreVel = new Float32Array(CORE_COUNT*3);
-            for(let i=0;i<CORE_COUNT;i++) {
-                const xRand = Math.random()-0.5;
-                const sign = xRand<0?-1:1;
-                coreBase[i*3] = sign * Math.pow(Math.abs(xRand),1.6)*0.32;
-                coreBase[i*3+1] = (Math.random()-0.5)*3.3;
-                coreBase[i*3+2] = (Math.random()-0.5)*0.18;
-                corePositions[i*3] = coreBase[i*3];
-                corePositions[i*3+1] = coreBase[i*3+1];
-                corePositions[i*3+2] = coreBase[i*3+2];
-            }
-        }
+        float fog = smoothstep(0.3,0.7,density);
 
-        function animateField() { /* оптимизированный код */ 
-            const movingCenters = [
-                {x:Math.sin(time*0.7)*0.45, y:0.8+Math.sin(time*1.15)*0.55},
-                {x:-1.2+Math.sin(time*0.85+1)*0.35, y:Math.sin(time*1.35)*0.8},
-                {x:1.2+Math.sin(time*0.9+2)*0.35, y:Math.sin(time*1.35+Math.PI)*0.8},
-                {x:Math.sin(time*0.65+3)*0.45, y:-0.8+Math.sin(time*1.05)*0.55}
-            ];
+        vec3 col = vec3(0.82,0.83,0.85);
 
-            for(let i=0;i<particleCount;i++) {
-                const col = particleColors[i];
-                const cx = movingCenters[col].x, cy = movingCenters[col].y;
-                const wave = Math.sin(basePositions[i*3+1]*3.1 + time*3.2 + col)*0.27;
-                const dx = cx - positions[i*3], dy = cy - positions[i*3+1];
-                velocities[i*3] += dx*0.042 + (0-positions[i*3])*0.075;
-                velocities[i*3+1] += dy*0.042;
-                velocities[i*3]*=0.875; velocities[i*3+1]*=0.875; velocities[i*3+2]*=0.88;
-                positions[i*3] = basePositions[i*3] + wave + velocities[i*3] + (Math.random()-0.5)*0.035;
-                positions[i*3+1] = basePositions[i*3+1] + velocities[i*3+1] + (Math.random()-0.5)*0.035;
-                positions[i*3+2] = basePositions[i*3+2] + velocities[i*3+2];
-            }
+        gl_FragColor = vec4(col*fog, fog*0.07);
+      }
+    `
+  });
 
-            colorGroups.forEach(group => {
-                let ci=0; const cIdx=group.colorIdx;
-                for(let i=0; i<particleCount && ci<group.count; i++) {
-                    if(particleColors[i]===cIdx) {
-                        group.positions[ci*3]=positions[i*3];
-                        group.positions[ci*3+1]=positions[i*3+1];
-                        group.positions[ci*3+2]=positions[i*3+2];
-                        ci++;
-                    }
-                }
-                group.geo.attributes.position.needsUpdate = true;
-            });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.isEnergy = true;
 
-            for(let i=0;i<CORE_COUNT;i++) {
-                const wave = Math.sin(coreBase[i*3+1]*3.1 + time*3.6)*0.16;
-                const dx = -corePositions[i*3]*0.17;
-                coreVel[i*3] += dx;
-                coreVel[i*3+1] += (coreBase[i*3+1]-corePositions[i*3+1])*0.06;
-                coreVel[i*3]*=0.81; coreVel[i*3+1]*=0.84; coreVel[i*3+2]*=0.84;
-                corePositions[i*3] = coreBase[i*3] + wave + coreVel[i*3];
-                corePositions[i*3+1] = coreBase[i*3+1] + coreVel[i*3+1];
-                corePositions[i*3+2] = coreBase[i*3+2] + coreVel[i*3+2];
-            }
-            coreGeo.attributes.position.needsUpdate = true;
+  return mesh;
+}
 
-            fieldGroup.rotation.y += 0.0028;
-        }
+function placeObject() {
+  if (!reticle.visible) return;
 
-        function resetField() {
-            if(fieldGroup) fieldGroup.visible = false;
-            fieldPlaced = false;
-            document.getElementById('resetButton').style.display = 'none';
-        }
+  const energy = createEnergyField();
+  energy.position.setFromMatrixPosition(reticle.matrix);
+  scene.add(energy);
+}
 
-        function onResize() {
-            if(!camera || !renderer) return;
-            camera.aspect = window.innerWidth/window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
+function render(timestamp, frame){
 
-        init();
-    </script>
+  if(frame && hitTestSource){
+
+    const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+    if(hitTestResults.length > 0){
+      const hit = hitTestResults[0];
+      const pose = hit.getPose(localSpace);
+
+      reticle.visible = true;
+      reticle.matrix.fromArray(pose.transform.matrix);
+    } else {
+      reticle.visible = false;
+    }
+  }
+
+  scene.traverse(obj=>{
+    if(obj.userData.isEnergy){
+      obj.material.uniforms.time.value = timestamp*0.001;
+    }
+  });
+
+  renderer.render(scene, camera);
+}
+
+</script>
 </body>
 </html>
