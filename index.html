@@ -1,424 +1,182 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digital Soul: AR Mode</title>
-    <style>
-        body { 
-            margin: 0; 
-            overflow: hidden; 
-            background: #000; 
-            font-family: 'Courier New', monospace; 
-            color: #00ffcc;
-            touch-action: none;
-        }
-        #info {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            right: 20px;
-            background: rgba(0, 15, 15, 0.95);
-            padding: 15px;
-            border: 1px solid #00ffcc;
-            border-radius: 8px;
-            z-index: 10;
-            font-size: 12px;
-        }
-        #arButton {
-            position: absolute;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 15px 40px;
-            background: #00ffcc;
-            color: #000;
-            border: none;
-            border-radius: 8px;
-            font-weight: bold;
-            font-size: 16px;
-            cursor: pointer;
-            z-index: 100;
-            display: none;
-        }
-        #arButton:hover { background: #fff; }
-        #arButton:disabled {
-            background: #666;
-            color: #999;
-        }
-        .hidden { display: none !important; }
-    </style>
+<meta charset="utf-8">
+<title>Energy Field AR</title>
+<style>
+  body { margin:0; overflow:hidden; }
+  button {
+    position:absolute;
+    bottom:20px;
+    left:50%;
+    transform:translateX(-50%);
+    padding:12px 20px;
+    font-size:16px;
+    z-index:10;
+  }
+</style>
 </head>
 <body>
-    <div id="info">
-        <div style="font-weight: bold; margin-bottom: 8px;">📱 AR MODE</div>
-        <div id="status">Проверка AR поддержки...</div>
-    </div>
-    
-    <button id="arButton">ВОЙТИ В AR</button>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script type="module">
-        let scene, camera, renderer;
-        let crystal, reticle;
-        let particleCount = 3000; // Меньше для мобильного
-        let CORE_COUNT = 1500;
-        let positions, basePositions, particleColors, velocities;
-        let corePositions, coreBase, coreVel, coreGeo, corePts;
-        let time = 0;
-        let isActive = true; // Всегда активен в AR
+<button id="start">Start AR</button>
 
-        const COLOR_LIST = [
-            [0.0, 1.0, 0.8],   // циан
-            [0.0, 0.5, 1.0],   // синий
-            [0.8, 0.2, 1.0],   // фиолет
-            [1.0, 0.3, 0.0],   // оранжевый
-        ];
-        const NUM_COLORS = COLOR_LIST.length;
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
+import { ARButton } from "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/webxr/ARButton.js";
 
-        const attractCenters = [
-            { x:  0.0, y:  0.8 },
-            { x: -1.2, y:  0.0 },
-            { x:  1.2, y:  0.0 },
-            { x:  0.0, y: -0.8 },
-        ];
+let camera, scene, renderer;
+let controller;
+let reticle;
+let hitTestSource = null;
+let localSpace = null;
 
-        let hitTestSource = null;
-        let hitTestSourceRequested = false;
-        let xrRefSpace = null;
-        let fieldPlaced = false;
+init();
 
-        init();
+function init() {
 
-        function init() {
-            // Проверка AR поддержки
-            if ('xr' in navigator) {
-                navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-                    if (supported) {
-                        document.getElementById('status').textContent = 
-                            '✅ AR поддерживается! Нажми кнопку и наведи на пол.';
-                        document.getElementById('arButton').style.display = 'block';
-                    } else {
-                        document.getElementById('status').textContent = 
-                            '❌ AR не поддерживается на этом устройстве.';
-                    }
-                });
-            } else {
-                document.getElementById('status').textContent = 
-                    '❌ WebXR не доступен. Нужен Chrome на Android.';
-            }
+  scene = new THREE.Scene();
 
-            document.getElementById('arButton').addEventListener('click', activateAR);
-        }
+  camera = new THREE.PerspectiveCamera();
 
-        async function activateAR() {
-            const session = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['hit-test'],
-                optionalFeatures: ['dom-overlay'],
-                domOverlay: { root: document.body }
-            });
+  renderer = new THREE.WebGLRenderer({ alpha:true, antialias:true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-            session.addEventListener('end', onSessionEnded);
+  const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+  scene.add(light);
 
-            // Scene setup
-            scene = new THREE.Scene();
+  // Reticle (куда ставим объект)
+  const ring = new THREE.RingGeometry(0.05, 0.06, 32).rotateX(-Math.PI/2);
+  const mat = new THREE.MeshBasicMaterial({ color:0xaaaaaa });
+  reticle = new THREE.Mesh(ring, mat);
+  reticle.matrixAutoUpdate = false;
+  reticle.visible = false;
+  scene.add(reticle);
 
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+  controller = renderer.xr.getController(0);
+  controller.addEventListener("select", placeObject);
+  scene.add(controller);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
+  document.getElementById("start").addEventListener("click", async () => {
 
-            // Reticle - указатель куда поставить
-            const reticleGeo = new THREE.RingGeometry(0.15, 0.2, 32).rotateX(-Math.PI / 2);
-            const reticleMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
-            reticle = new THREE.Mesh(reticleGeo, reticleMat);
-            reticle.matrixAutoUpdate = false;
-            reticle.visible = false;
-            scene.add(reticle);
+    const session = await navigator.xr.requestSession("immersive-ar", {
+      requiredFeatures:["hit-test","local-floor"]
+    });
 
-            // Создаём квантовое поле (изначально скрыто)
-            createQuantumField();
+    renderer.xr.setReferenceSpaceType("local");
+    await renderer.xr.setSession(session);
 
-            await renderer.xr.setSession(session);
+    localSpace = await session.requestReferenceSpace("local");
+    const viewerSpace = await session.requestReferenceSpace("viewer");
 
-            document.getElementById('info').classList.add('hidden');
-            document.getElementById('arButton').classList.add('hidden');
+    hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
 
-            renderer.xr.setAnimationLoop(render);
-        }
+    renderer.setAnimationLoop(render);
+  });
+}
 
-        function createQuantumField() {
-            const fieldGroup = new THREE.Group();
-            fieldGroup.visible = false; // Скрыто до размещения
-            fieldGroup.scale.set(0.3, 0.3, 0.3); // Меньше масштаб для AR
-            scene.add(fieldGroup);
-            window.fieldGroup = fieldGroup;
+function createEnergyField() {
 
-            // Каркас
-            const geometry = new THREE.BoxGeometry(2.2, 3.0, 0.3);
-            crystal = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-                color: 0x00ffcc, transparent: true, opacity: 0.04, wireframe: true
-            }));
-            fieldGroup.add(crystal);
+  const geometry = new THREE.SphereGeometry(0.15, 64, 64);
 
-            // Цветные частицы
-            particleColors = new Uint8Array(particleCount);
-            velocities = new Float32Array(particleCount * 3);
-            positions = new Float32Array(particleCount * 3);
-            basePositions = new Float32Array(particleCount * 3);
+  const material = new THREE.ShaderMaterial({
+    transparent:true,
+    side:THREE.BackSide,
+    uniforms:{ time:{ value:0 }},
+    vertexShader:`
+      varying vec3 vPos;
+      void main(){
+        vPos = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+      }
+    `,
+    fragmentShader:`
+      varying vec3 vPos;
+      uniform float time;
 
-            for (let i = 0; i < particleCount; i++) particleColors[i] = i % NUM_COLORS;
-            updateParticleDistribution();
+      float hash(vec3 p){
+        return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453);
+      }
 
-            const colorSystems = [];
-            for (let c = 0; c < NUM_COLORS; c++) {
-                const col = COLOR_LIST[c];
-                const cnt = Math.floor(particleCount / NUM_COLORS);
-                const geo = new THREE.BufferGeometry();
-                const cPos = new Float32Array(cnt * 3);
-                let ci = 0;
-                for (let i = 0; i < particleCount; i++) {
-                    if (particleColors[i] === c && ci < cnt) {
-                        cPos[ci * 3] = positions[i * 3];
-                        cPos[ci * 3 + 1] = positions[i * 3 + 1];
-                        cPos[ci * 3 + 2] = positions[i * 3 + 2];
-                        ci++;
-                    }
-                }
-                geo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
-                const mat = new THREE.PointsMaterial({
-                    size: 0.04, map: makeTexture(col[0] * 255, col[1] * 255, col[2] * 255),
-                    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
-                });
-                const pts = new THREE.Points(geo, mat);
-                fieldGroup.add(pts);
-                colorSystems.push({ pts, geo, cPos, colorIdx: c });
-            }
-            window._colorSystems = colorSystems;
+      float noise(vec3 p){
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f*f*(3.0-2.0*f);
 
-            // Белое ядро
-            corePositions = new Float32Array(CORE_COUNT * 3);
-            coreBase = new Float32Array(CORE_COUNT * 3);
-            coreVel = new Float32Array(CORE_COUNT * 3);
-            buildCoreBase();
+        float n = mix(
+          mix(
+            mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x),
+            mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x),
+            f.y),
+          mix(
+            mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
+            mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x),
+            f.y),
+          f.z);
+        return n;
+      }
 
-            coreGeo = new THREE.BufferGeometry();
-            coreGeo.setAttribute('position', new THREE.BufferAttribute(corePositions, 3));
+      void main(){
 
-            // 3 слоя белого ядра
-            corePts = new THREE.Points(coreGeo, new THREE.PointsMaterial({
-                size: 0.18, map: makeTexture(220, 240, 255),
-                transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.5
-            }));
-            fieldGroup.add(corePts);
+        vec3 pos = vPos * 0.8;
 
-            fieldGroup.add(new THREE.Points(coreGeo, new THREE.PointsMaterial({
-                size: 0.09, map: makeTexture(255, 255, 255),
-                transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.9
-            })));
+        float base = noise(pos*4.0);
+        float structure = noise(pos*0.8);
 
-            fieldGroup.add(new THREE.Points(coreGeo, new THREE.PointsMaterial({
-                size: 0.035, map: makeTexture(255, 255, 255),
-                transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, opacity: 1.0
-            })));
-        }
+        float density = base * (0.85 + 0.15*structure);
 
-        function makeTexture(r, g, b) {
-            const c = document.createElement('canvas');
-            c.width = c.height = 32;
-            const ctx = c.getContext('2d');
-            const grad = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
-            grad.addColorStop(0, `rgba(${r | 0},${g | 0},${b | 0},1.0)`);
-            grad.addColorStop(0.4, `rgba(${r | 0},${g | 0},${b | 0},0.4)`);
-            grad.addColorStop(1, 'rgba(0,0,0,0)');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, 32, 32);
-            return new THREE.CanvasTexture(c);
-        }
+        density += sin(time*0.3)*0.01;
 
-        function updateParticleDistribution() {
-            const density = 2.5;
-            const radius = 2.2;
-            for (let i = 0; i < particleCount; i++) {
-                const t = i / particleCount;
-                if (t < 0.45) {
-                    const distFactor = Math.pow(Math.random(), density * 1.5);
-                    basePositions[i * 3] = (Math.random() - 0.5) * 2.2 * distFactor * 2.0;
-                    basePositions[i * 3 + 1] = (Math.random() - 0.5) * 3.2;
-                    basePositions[i * 3 + 2] = (Math.random() - 0.5) * 0.4;
-                } else {
-                    const distFactor = Math.pow(Math.random(), density * 0.5);
-                    const r = radius * distFactor;
-                    const theta = Math.random() * 2 * Math.PI;
-                    basePositions[i * 3] = r * Math.cos(theta) * 1.4;
-                    basePositions[i * 3 + 1] = (Math.random() - 0.5) * 3.5;
-                    basePositions[i * 3 + 2] = r * Math.sin(theta) * 0.6;
-                }
-                positions[i * 3] = basePositions[i * 3];
-                positions[i * 3 + 1] = basePositions[i * 3 + 1];
-                positions[i * 3 + 2] = basePositions[i * 3 + 2];
-            }
-        }
+        float fog = smoothstep(0.3,0.7,density);
 
-        function buildCoreBase() {
-            const w = 0.15;
-            for (let i = 0; i < CORE_COUNT; i++) {
-                const xRand = (Math.random() - 0.5);
-                const xSign = xRand < 0 ? -1 : 1;
-                coreBase[i * 3] = xSign * Math.pow(Math.abs(xRand), 1.5) * w * 2.0;
-                coreBase[i * 3 + 1] = (Math.random() - 0.5) * 3.2;
-                coreBase[i * 3 + 2] = (Math.random() - 0.5) * 0.15;
-                corePositions[i * 3] = coreBase[i * 3];
-                corePositions[i * 3 + 1] = coreBase[i * 3 + 1];
-                corePositions[i * 3 + 2] = coreBase[i * 3 + 2];
-            }
-        }
+        vec3 col = vec3(0.82,0.83,0.85);
 
-        function render(timestamp, frame) {
-            if (frame) {
-                xrRefSpace = renderer.xr.getReferenceSpace();
+        gl_FragColor = vec4(col*fog, fog*0.07);
+      }
+    `
+  });
 
-                // Hit test для размещения объекта
-                if (!hitTestSourceRequested) {
-                    const session = renderer.xr.getSession();
-                    session.requestReferenceSpace('viewer').then((refSpace) => {
-                        session.requestHitTestSource({ space: refSpace }).then((source) => {
-                            hitTestSource = source;
-                        });
-                    });
-                    hitTestSourceRequested = true;
-                }
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.isEnergy = true;
 
-                if (hitTestSource && !fieldPlaced) {
-                    const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    if (hitTestResults.length) {
-                        const hit = hitTestResults[0];
-                        reticle.visible = true;
-                        const pose = hit.getPose(xrRefSpace);
-                        reticle.matrix.fromArray(pose.transform.matrix);
-                    }
-                } else {
-                    reticle.visible = false;
-                }
+  return mesh;
+}
 
-                // Tap to place
-                const session = frame.session;
-                const inputSources = session.inputSources;
-                for (let i = 0; i < inputSources.length; i++) {
-                    const inputSource = inputSources[i];
-                    if (inputSource.gamepad && inputSource.gamepad.buttons.length) {
-                        const button = inputSource.gamepad.buttons[0];
-                        if (button.pressed && !fieldPlaced && reticle.visible) {
-                            // Размещаем поле
-                            window.fieldGroup.position.setFromMatrixPosition(reticle.matrix);
-                            window.fieldGroup.visible = true;
-                            fieldPlaced = true;
-                            hitTestSource.cancel();
-                            hitTestSource = null;
-                        }
-                    }
-                }
-            }
+function placeObject() {
+  if (!reticle.visible) return;
 
-            // Анимация если поле размещено
-            if (fieldPlaced) {
-                time += 0.02;
-                animateField();
-            }
+  const energy = createEnergyField();
+  energy.position.setFromMatrixPosition(reticle.matrix);
+  scene.add(energy);
+}
 
-            renderer.render(scene, camera);
-        }
+function render(timestamp, frame){
 
-        function animateField() {
-            const attract = 0.5;
-            const amp = 0.25;
-            const freq = 3.0;
-            const jitter = 0.05;
+  if(frame && hitTestSource){
 
-            const movingCenters = [
-                { x: Math.sin(time * 0.7) * 0.4, y: 0.8 + Math.sin(time * 1.1) * 0.5 },
-                { x: -1.2 + Math.sin(time * 0.9 + 1.0) * 0.3, y: Math.sin(time * 1.3) * 0.8 },
-                { x: 1.2 + Math.sin(time * 0.9 + 2.0) * 0.3, y: Math.sin(time * 1.3 + Math.PI) * 0.8 },
-                { x: Math.sin(time * 0.6 + 3.0) * 0.4, y: -0.8 + Math.sin(time * 1.0) * 0.5 },
-            ];
+    const hitTestResults = frame.getHitTestResults(hitTestSource);
 
-            for (let i = 0; i < particleCount; i++) {
-                const bx = basePositions[i * 3];
-                const by = basePositions[i * 3 + 1];
-                const bz = basePositions[i * 3 + 2];
-                const col = particleColors[i];
+    if(hitTestResults.length > 0){
+      const hit = hitTestResults[0];
+      const pose = hit.getPose(localSpace);
 
-                const cx = movingCenters[col].x;
-                const cy = movingCenters[col].y;
+      reticle.visible = true;
+      reticle.matrix.fromArray(pose.transform.matrix);
+    } else {
+      reticle.visible = false;
+    }
+  }
 
-                const wavePhase = by * freq + time * 3.0 + col * (Math.PI / 2);
-                const waveX = Math.sin(wavePhase) * amp;
+  scene.traverse(obj=>{
+    if(obj.userData.isEnergy){
+      obj.material.uniforms.time.value = timestamp*0.001;
+    }
+  });
 
-                const dx = cx - positions[i * 3];
-                const dy = cy - positions[i * 3 + 1];
-                const dxToCore = (0 - positions[i * 3]) * 0.08 * attract;
+  renderer.render(scene, camera);
+}
 
-                velocities[i * 3] += dx * attract * 0.04 + dxToCore;
-                velocities[i * 3 + 1] += dy * attract * 0.04;
-                velocities[i * 3] *= 0.88;
-                velocities[i * 3 + 1] *= 0.88;
-                velocities[i * 3 + 2] *= 0.88;
-
-                positions[i * 3] = bx + waveX + velocities[i * 3] + (Math.random() - 0.5) * jitter * 0.3;
-                positions[i * 3 + 1] = by + velocities[i * 3 + 1] + (Math.random() - 0.5) * jitter * 0.3;
-                positions[i * 3 + 2] = bz + velocities[i * 3 + 2];
-            }
-
-            window._colorSystems.forEach(({ geo, cPos, colorIdx }) => {
-                const cnt = Math.floor(particleCount / NUM_COLORS);
-                let ci = 0;
-                for (let i = 0; i < particleCount && ci < cnt; i++) {
-                    if (particleColors[i] === colorIdx) {
-                        cPos[ci * 3] = positions[i * 3];
-                        cPos[ci * 3 + 1] = positions[i * 3 + 1];
-                        cPos[ci * 3 + 2] = positions[i * 3 + 2];
-                        ci++;
-                    }
-                }
-                geo.attributes.position.needsUpdate = true;
-            });
-
-            // Белое ядро
-            const mass = 0.5;
-            for (let i = 0; i < CORE_COUNT; i++) {
-                const bx = coreBase[i * 3];
-                const by = coreBase[i * 3 + 1];
-                const bz = coreBase[i * 3 + 2];
-
-                const wavePhase = by * freq + time * 3.5;
-                const waveX = Math.sin(wavePhase) * amp * 0.6;
-
-                const dx = (0 - corePositions[i * 3]) * mass * 0.15;
-                const dy = (by - corePositions[i * 3 + 1]) * 0.05;
-
-                coreVel[i * 3] += dx;
-                coreVel[i * 3 + 1] += dy;
-                coreVel[i * 3] *= 0.82;
-                coreVel[i * 3 + 1] *= 0.85;
-                coreVel[i * 3 + 2] *= 0.85;
-
-                corePositions[i * 3] = bx + waveX + coreVel[i * 3];
-                corePositions[i * 3 + 1] = by + coreVel[i * 3 + 1];
-                corePositions[i * 3 + 2] = bz + coreVel[i * 3 + 2];
-            }
-            coreGeo.attributes.position.needsUpdate = true;
-
-            crystal.rotation.y += 0.003;
-        }
-
-        function onSessionEnded() {
-            hitTestSourceRequested = false;
-            hitTestSource = null;
-            fieldPlaced = false;
-        }
-    </script>
+</script>
 </body>
 </html>
