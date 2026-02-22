@@ -1,127 +1,135 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
-<meta charset="utf-8">
-<title>Quest Energy Test</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XR Start Panel</title>
+
 <style>
-  body { margin:0; overflow:hidden; }
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: sans-serif;
+}
+
+#ui {
+  position: fixed;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 10;
+}
+
+button {
+  padding: 12px 20px;
+  font-size: 16px;
+  border-radius: 10px;
+  border: none;
+}
 </style>
 </head>
+
 <body>
 
-<script type="module">
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
-import { ARButton } from "https://cdn.jsdelivr.net/npm/three@0.160/examples/jsm/webxr/ARButton.js";
+<button id="enterAR">Войти в AR</button>
 
-let camera, scene, renderer, energy;
+<div id="ui">
+  <button id="startSim">Начать симуляцию</button>
+  <button id="errorSim">Ошибка симуляции</button>
+  <button id="cancelSim">Отмена</button>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
+
+let camera, scene, renderer;
+let simulationObject;
 
 init();
 
-function init(){
+function init() {
 
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera();
+  camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-  renderer = new THREE.WebGLRenderer({
-    antialias:true,
-    alpha:true
-  });
-
+  renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.xr.enabled = true;
-  renderer.outputColorSpace = THREE.SRGBColorSpace;
+
   document.body.appendChild(renderer.domElement);
 
-  document.body.appendChild(
-    ARButton.createButton(renderer, {
-      requiredFeatures: ['local-floor']
-    })
-  );
+  document.getElementById("enterAR").addEventListener("click", startAR);
 
-  // Мягкий свет (чтобы не было чёрного)
-  const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-  scene.add(light);
+  window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+}
 
-  createEnergyField();
+async function startAR() {
+
+  if (!navigator.xr) {
+    alert("WebXR не поддерживается");
+    return;
+  }
+
+  const session = await navigator.xr.requestSession("immersive-ar", {
+    requiredFeatures: ["local-floor"],
+    optionalFeatures: ["dom-overlay"],
+    domOverlay: { root: document.body }
+  });
+
+  renderer.xr.setReferenceSpaceType("local-floor");
+  await renderer.xr.setSession(session);
+
+  document.getElementById("enterAR").style.display = "none";
+  document.getElementById("ui").style.display = "flex";
 
   renderer.setAnimationLoop(render);
 }
 
-function createEnergyField(){
-
-  const geometry = new THREE.SphereGeometry(0.3, 64, 64);
-
-  const material = new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    side: THREE.BackSide,
-    uniforms: { time:{ value:0 }},
-    vertexShader: `
-      varying vec3 vWorld;
-      void main(){
-        vec4 worldPos = modelMatrix * vec4(position,1.0);
-        vWorld = worldPos.xyz;
-        gl_Position = projectionMatrix * viewMatrix * worldPos;
-      }
-    `,
-    fragmentShader: `
-      varying vec3 vWorld;
-      uniform float time;
-
-      float hash(vec3 p){
-        return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453);
-      }
-
-      float noise(vec3 p){
-        vec3 i = floor(p);
-        vec3 f = fract(p);
-        f = f*f*(3.0-2.0*f);
-
-        float n = mix(
-          mix(
-            mix(hash(i+vec3(0,0,0)), hash(i+vec3(1,0,0)), f.x),
-            mix(hash(i+vec3(0,1,0)), hash(i+vec3(1,1,0)), f.x),
-            f.y),
-          mix(
-            mix(hash(i+vec3(0,0,1)), hash(i+vec3(1,0,1)), f.x),
-            mix(hash(i+vec3(0,1,1)), hash(i+vec3(1,1,1)), f.x),
-            f.y),
-          f.z);
-        return n;
-      }
-
-      void main(){
-
-        float structure = noise(vWorld * 0.6);
-
-        float density = structure * 0.8;
-
-        density += sin(time * 0.2) * 0.005;
-
-        float fog = smoothstep(0.4, 0.75, density);
-
-        vec3 color = vec3(0.82,0.83,0.85);
-
-        gl_FragColor = vec4(color * fog, fog * 0.05);
-      }
-    `
-  });
-
-  energy = new THREE.Mesh(geometry, material);
-
-  energy.position.set(0, 1.5, -1.2); // перед тобой
-  scene.add(energy);
-}
-
-function render(time){
-
-  if(energy){
-    energy.material.uniforms.time.value = time * 0.001;
-  }
-
+function render() {
   renderer.render(scene, camera);
 }
 
+//
+// ====== UI ЛОГИКА ======
+//
+
+document.getElementById("startSim").addEventListener("click", () => {
+
+  if (simulationObject) return;
+
+  const geometry = new THREE.SphereGeometry(0.15, 32, 32);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x88ccff,
+    transparent: true,
+    opacity: 0.5
+  });
+
+  simulationObject = new THREE.Mesh(geometry, material);
+  simulationObject.position.set(0, 1.4, -1);
+  scene.add(simulationObject);
+
+});
+
+document.getElementById("errorSim").addEventListener("click", () => {
+  alert("Симуляция дала сбой");
+});
+
+document.getElementById("cancelSim").addEventListener("click", () => {
+
+  if (simulationObject) {
+    scene.remove(simulationObject);
+    simulationObject = null;
+  }
+
+});
 </script>
+
 </body>
 </html>
