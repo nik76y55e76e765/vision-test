@@ -2,30 +2,33 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>Digital Soul: Base Alpha</title>
+    <title>Digital Soul: Energy Vision</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   </head>
   <body>
     <a-scene webxr="optionalFeatures: hit-test, local-floor; overlayElement: #gui;">
       
-      <a-entity camera look-controls position="0 1.6 0"></a-entity>
+      <a-entity camera look-controls position="0 1.6 0">
+        
+        <a-sphere id="fog-lens" 
+                  radius="0.3" 
+                  position="0 0 -0.5" 
+                  material="color: #666; transparent: true; opacity: 0.3; shader: flat; side: double;"
+                  animation="property: material.opacity; from: 0.2; to: 0.5; dur: 3000; dir: alternate; loop: true">
+        </a-sphere>
 
-      <a-entity id="menu" position="0 1.5 -1">
-        <a-plane color="#000" opacity="0.8" width="0.6" height="0.4">
-            <a-text value="Digital Soul Protocol\nStatus: Online\nReady for Energy Scan" 
-                    align="center" color="#00ffcc" width="1.5"></a-text>
-        </a-plane>
+        <a-ring color="#00ffcc" radius-inner="0.01" radius-outer="0.02" position="0 0 -1" opacity="0.5"></a-ring>
       </a-entity>
 
+      <a-light type="ambient" color="#00ffcc" intensity="0.3"></a-light>
     </a-scene>
 
-    <div id="gui" style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 999;">
+    <div id="gui" style="position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 999;">
         <button onclick="document.querySelector('a-scene').enterAR()" 
-                style="padding: 15px 30px; background: #00ffcc; border: none; border-radius: 10px; cursor: pointer;">
-            ЗАПУСТИТЬ ВИДЕНИЕ
+                style="padding: 20px 40px; background: #00ffcc; border: none; border-radius: 12px; font-weight: bold; cursor: pointer;">
+            АКТИВИРОВАТЬ ТУМАН
         </button>
     </div>
   </body>
 </html>
-
 
