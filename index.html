@@ -2,74 +2,81 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>Digital Soul: Scanner</title>
+    <title>Digital Soul: AR Scanner</title>
     <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    <style>
+      #gui {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 15px;
+        z-index: 10001; /* Поверх всего */
+        pointer-events: auto;
+      }
+      button {
+        padding: 12px 20px;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        cursor: pointer;
+        font-family: sans-serif;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      }
+      .btn-start { background: #00ffcc; color: #000; }
+      .btn-reload { background: #555; color: #fff; }
+      .btn-exit { background: #ff4444; color: #fff; }
+    </style>
   </head>
-  <body style="margin: 0; overflow: hidden;">
+  <body>
     
-    <script>
-      AFRAME.registerComponent('ar-handler', {
-        init: function () {
-          this.xrHitTestSource = null;
-          this.viewerSpace = null;
-          this.reticle = document.getElementById('reticle');
+    <div id="gui">
+        <button class="btn-start" onclick="document.querySelector('a-scene').enterAR()">ЗАПУСТИТЬ</button>
+        <button class="btn-reload" onclick="window.location.reload()">🔄</button>
+        <button class="btn-exit" onclick="document.querySelector('a-scene').exitVR()">ВЫХОД</button>
+    </div>
 
-          this.el.sceneEl.renderer.xr.addEventListener('sessionstart', async () => {
-            let session = this.el.sceneEl.renderer.xr.getSession();
-            this.viewerSpace = await session.requestReferenceSpace('viewer');
-            this.xrHitTestSource = await session.requestHitTestSource({ space: this.viewerSpace });
-          });
-        },
-        tick: function () {
-          let frame = this.el.sceneEl.frame;
-          if (!frame || !this.xrHitTestSource) return;
-
-          let hitTestResults = frame.getHitTestResults(this.xrHitTestSource);
-          if (hitTestResults.length > 0) {
-            let pose = hitTestResults[0].getPose(this.el.sceneEl.renderer.xr.getReferenceSpace());
-            this.reticle.setAttribute('position', pose.transform.position);
-            this.reticle.setAttribute('rotation', {x: -90, y: 0, z: 0});
-            this.reticle.setAttribute('visible', true);
-          }
-        }
-      });
-
-      function reloadPage() {
-        window.location.reload();
-      }
-
-      function exitAR() {
-        let scene = document.querySelector('a-scene');
-        if (scene.is('ar-mode')) {
-          scene.exitVR();
-        }
-      }
-    </script>
-
-    <a-scene webxr="optionalFeatures: hit-test, local-floor; overlayElement: #gui;" ar-handler>
+    <a-scene webxr="optionalFeatures: hit-test, local-floor, dom-overlay; overlayElement: #gui;" ar-handler>
+      
       <a-entity camera position="0 1.6 0"></a-entity>
 
       <a-entity id="reticle" visible="false">
-        <a-ring color="#00ffcc" radius-inner="0.04" radius-outer="0.05" opacity="0.8"></a-ring>
-        <a-cylinder radius="0.04" height="0.01" material="color: #00ffcc; opacity: 0.2; transparent: true"></a-cylinder>
+        <a-ring color="#00ffcc" radius-inner="0.04" radius-outer="0.05" rotation="-90 0 0" opacity="0.9"></a-ring>
+        <a-sphere radius="0.005" color="#00ffcc"></a-sphere>
       </a-entity>
+
+      <script>
+        AFRAME.registerComponent('ar-handler', {
+          init: function () {
+            this.xrHitTestSource = null;
+            this.viewerSpace = null;
+            this.reticle = document.getElementById('reticle');
+
+            this.el.sceneEl.renderer.xr.addEventListener('sessionstart', async () => {
+              let session = this.el.sceneEl.renderer.xr.getSession();
+              // Запрашиваем пространство зрителя
+              this.viewerSpace = await session.requestReferenceSpace('viewer');
+              // Источник луча для поиска поверхностей
+              this.xrHitTestSource = await session.requestHitTestSource({ space: this.viewerSpace });
+            });
+          },
+          tick: function () {
+            const frame = this.el.sceneEl.frame;
+            if (!frame || !this.xrHitTestSource) return;
+
+            const hitTestResults = frame.getHitTestResults(this.xrHitTestSource);
+            if (hitTestResults.length > 0) {
+              const pose = hitTestResults[0].getPose(this.el.sceneEl.renderer.xr.getReferenceSpace());
+              this.reticle.setAttribute('position', pose.transform.position);
+              // Убираем вращение из кода, чтобы оно ложилось плоско по сетке
+              this.reticle.setAttribute('visible', true);
+            }
+          }
+        });
+      </script>
+
     </a-scene>
-
-    <div id="gui" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 9999;">
-        <button onclick="document.querySelector('a-scene').enterAR()" 
-                style="padding: 15px; background: #00ffcc; border: none; border-radius: 8px; font-weight: bold; cursor: pointer;">
-            ЗАПУСТИТЬ
-        </button>
-        <button onclick="reloadPage()" 
-                style="padding: 15px; background: #555; color: white; border: none; border-radius: 8px; cursor: pointer;">
-            🔄
-        </button>
-        <button onclick="exitAR()" 
-                style="padding: 15px; background: #ff4444; color: white; border: none; border-radius: 8px; cursor: pointer;">
-            ВЫХОД
-        </button>
-    </div>
-
   </body>
 </html>
 
